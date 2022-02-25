@@ -6,10 +6,11 @@ Created on Thu Feb 24 20:32:05 2022
 """
 
 #example taken from https://towardsdatascience.com/creating-deep-neural-networks-from-scratch-an-introduction-to-reinforcement-learning-part-i-549ef7b149d2
-
+#https://towardsdatascience.com/creating-deep-neural-networks-from-scratch-an-introduction-to-reinforcement-learning-6bba874019db
 
 import gym
 import numpy as np
+from collections import deque
 
 class NNLayer:
   def __init__(self, input_size, output_size, activation=None, lr = 0.001):
@@ -41,10 +42,11 @@ class RLAgent:
     self.output_size = env.action_space.n
     self.num_hidden_layers = 2
     self.epsilon = 1.0
+    self.memory = deque([],1000000)
     
-    self.layers = [NNLayer(input_size+1,self.hidden_size,activation=relu)]
+    self.layers = [NNLayer(self.input_size+1,self.hidden_size,activation=self.relu)]
     for i in range(self.num_hidden_layers-1):
-      self.layers.append(NNLayer(self.hidden_size+1, self.hidden_size, activation=relu))
+      self.layers.append(NNLayer(self.hidden_size+1, self.hidden_size, activation=self.relu))
     self.layers.append(NNLayer(self.hidden_size+1,self.output_size))
     
   def select_action(self, observation):
@@ -60,10 +62,33 @@ class RLAgent:
     for layer in self.layers:
       vals = layer.forward(vals, remember_for_backprop)
       index += 1
-    return val
+    return vals
   
   def relu(mat):
     return np.multiply(mat,(mat>0))
+  
+  def remember(self, done, action, observation, prev_obs):
+    self.memory.append([done, action, observation, prev_obs])
+    
+  def experience_replay(self, update_size=20):
+    if (len(self.memory) < update_size):
+      return
+    else:
+      batch_indices = np.random.choice(len(self.memory), update_size)
+      for idx in batch_indices:
+        done, action_selected, new_obs, prev_obs = self.memory[idx]
+        action_values = self.forward(prev_obs, remember_for_backprop=True)
+        next_action_values = self.forward(new_obs, remember_for_backprop=False)
+        experimental_values = np.copy(action_values)
+        if done:
+          experimental_values[action_selected] = -1
+        else:
+          experimental_values[action_selected] = 1 + self.gamma*np.max(next_action_values)
+        self.backward(action_values, experimental_values)
+        self.epsilon = self.epsilon if self.epsilon < 0.01 else self.epsilon*0.995
+        for layer in self.layers:
+          layer.lr - layer.lr if layer.lr < 0.0001 else layer.lr*0.995
+        
 
 
 if __name__ == '__main__':
@@ -77,7 +102,10 @@ if __name__ == '__main__':
     for t in range(MAX_TIMESTEPS):
       env.render()
       action = model.select_action(observation)
+      prev_obs = observation
       observation, reward, done, info = env.step(action)
+      model.remember(done, action, observation, prev_obs)
+      model.experience_replay(20)
       model.epsilon = model.epsilon if model.epsilon < 0.01 else model.epsilon*0.995
       if done:
         print('Episode {} ended after {} timesteps, current exploration is {}'.format(i_episode, t+1,model.epsilon))
